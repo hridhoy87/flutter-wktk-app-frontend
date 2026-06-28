@@ -166,28 +166,55 @@ class PttBloc extends Bloc<PttEvent, PttStateContainer> {
     
     _audioSignalingSubscription = audioRepository.signalingStream.listen((payload) {
       if (_currentUserId == null) return;
-      for (final targetId in _currentPresence.keys) {
-        if (targetId != _currentUserId) {
-          signalingRepository.sendSignaling(targetId, payload);
-        }
+      
+      // If a specific target is set, send only to them (Point-to-Point)
+      if (payload.toUserId != null) {
+        signalingRepository.sendSignaling(payload.toUserId!, payload);
+      } else {
+        // Broadcast to everyone in the channel (Control messages like VOICE_START/STOP)
+        signalingRepository.sendBroadcast(payload);
       }
     });
   }
 
   Future<void> _onInitialize(PttInitializeRequested event, Emitter<PttStateContainer> emit) async {
-    emit(state.copyWith(status: PttState.connecting, currentUserId: event.userId, activeGroupId: event.groupId));
+    emit(state.copyWith(status: PttState.connecting, currentUserId: event.userId));
     try {
       _currentUserId = event.userId;
       
       final users = await authRepository.getOnlineUsers();
-      final channels = await authRepository.getChannels();
-      emit(state.copyWith(allUsers: users, availableChannels: channels));
+      final rawChannels = await authRepository.getChannels();
+      
+      // Sort channels: Global first, then chronologically/by ID
+      final List<Map<String, dynamic>> channels = List.from(rawChannels);
+      channels.sort((a, b) {
+        if (a['name'].toString().toLowerCase() == 'global') return -1;
+        if (b['name'].toString().toLowerCase() == 'global') return 1;
+        return a['id'].toString().compareTo(b['id'].toString());
+      });
+
+      // Automatically select Global if it exists, otherwise use event.groupId
+      String initialGroupId = event.groupId;
+      final globalChannel = channels.firstWhere(
+        (c) => c['name'].toString().toLowerCase() == 'global',
+        orElse: () => {},
+      );
+      if (globalChannel.isNotEmpty) {
+        initialGroupId = globalChannel['id'].toString();
+      }
+
+      emit(state.copyWith(
+        allUsers: users, 
+        availableChannels: channels,
+        activeGroupId: initialGroupId,
+      ));
 
       if (audioRepository is WebRtcAudioRepositoryImpl) {
         (audioRepository as WebRtcAudioRepositoryImpl).setUserId(event.userId);
       }
-      await presenceRepository.connect(userId: event.userId, groupIds: [event.groupId]);
-      await signalingRepository.init(event.groupId, event.userId);
+      
+      await presenceRepository.connect(userId: event.userId, groupIds: [initialGroupId]);
+      await signalingRepository.init(initialGroupId, event.userId);
       
       List<Map<String, dynamic>> iceServers = [{'urls': 'stun:stun.l.google.com:19302'}];
       try {
@@ -234,16 +261,42 @@ class PttBloc extends Bloc<PttEvent, PttStateContainer> {
   }
 
   Future<void> _onChannelChanged(PttChannelChanged event, Emitter<PttStateContainer> emit) async {
-    if (event.channelId == state.activeGroupId) return;
+    final oldChannelId = state.activeGroupId;
+    if (event.channelId == oldChannelId) return;
     
+    // LAST PERSON OUT LOGIC
+    if (oldChannelId != null) {
+      final oldChannel = state.availableChannels.firstWhere(
+        (c) => c['id'].toString() == oldChannelId,
+        orElse: () => {},
+      );
+
+      // If leaving a temporary channel and NO ONE ELSE is online
+      if (oldChannel['is_temporary'] == true && _currentPresence.isEmpty) {
+        try {
+          L.info('Last person out of channel $oldChannelId. Deleting...');
+          await authRepository.deleteChannel(int.parse(oldChannelId));
+        } catch (e) {
+          L.error('Failed to cleanup empty channel', e);
+        }
+      }
+    }
+
     emit(state.copyWith(status: PttState.connecting, activeGroupId: event.channelId, presence: {}));
     
     try {
       await presenceRepository.connect(userId: _currentUserId!, groupIds: [event.channelId]);
       await signalingRepository.init(event.channelId, _currentUserId!);
       
-      // Update channels list to include the new temp channel
-      final channels = await authRepository.getChannels();
+      // Update channels list and sort
+      final rawChannels = await authRepository.getChannels();
+      final List<Map<String, dynamic>> channels = List.from(rawChannels);
+      channels.sort((a, b) {
+        if (a['name'].toString().toLowerCase() == 'global') return -1;
+        if (b['name'].toString().toLowerCase() == 'global') return 1;
+        return a['id'].toString().compareTo(b['id'].toString());
+      });
+
       emit(state.copyWith(availableChannels: channels, status: PttState.idle));
     } catch (e) {
       emit(state.copyWith(status: PttState.error, errorMessage: e.toString()));
@@ -295,8 +348,18 @@ class PttBloc extends Bloc<PttEvent, PttStateContainer> {
     }
   }
 
-  void _onInviteAccepted(PttInviteAccepted event, Emitter<PttStateContainer> emit) {
+  Future<void> _onInviteAccepted(PttInviteAccepted event, Emitter<PttStateContainer> emit) async {
     emit(state.copyWith(clearInvite: true));
+    
+    // FETCH CHANNELS AGAIN before switching, so the new private channel 
+    // actually exists in the local 'availableChannels' list.
+    try {
+      final channels = await authRepository.getChannels();
+      emit(state.copyWith(availableChannels: channels));
+    } catch (e) {
+      L.error('Failed to refresh channels after invite', e);
+    }
+
     add(PttChannelChanged(event.invite.groupId!, password: event.invite.password));
   }
 

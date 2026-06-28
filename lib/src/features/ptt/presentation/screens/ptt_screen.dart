@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:share_plus/share_plus.dart';
@@ -98,6 +99,9 @@ class _PttScreenState extends State<PttScreen> {
         drawer: _buildDrawer(context),
         body: BlocBuilder<PttBloc, PttStateContainer>(
           builder: (context, state) {
+            if (state.status == PttState.connecting) {
+              return _buildLoadingState(context, state.activeGroupId);
+            }
             if (state.errorMessage != null) {
               return _buildErrorState(context, state.errorMessage!);
             }
@@ -146,6 +150,22 @@ class _PttScreenState extends State<PttScreen> {
               Navigator.pop(context);
             },
             child: const Text('ACCEPT', style: TextStyle(color: Colors.greenAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState(BuildContext context, String? channelId) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(color: Color(0xFFFFD700)),
+          const SizedBox(height: 24),
+          Text(
+            channelId != null ? 'JOINING CHANNEL $channelId...' : 'CONNECTING...',
+            style: const TextStyle(color: Colors.white70, letterSpacing: 1.5, fontSize: 12),
           ),
         ],
       ),
@@ -338,14 +358,74 @@ class _PttScreenState extends State<PttScreen> {
       child: SafeArea(
         child: Column(
           children: [
+            // User Profile Header
+            BlocBuilder<PttBloc, PttStateContainer>(
+              builder: (context, state) {
+                final displayName = _getDisplayName(state.currentUserId ?? '', state.allUsers);
+                return Container(
+                  padding: const EdgeInsets.all(24),
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.03),
+                    border: const Border(bottom: BorderSide(color: Colors.white10)),
+                  ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: const Color(0xFFFFD700).withOpacity(0.1),
+                        child: Text(
+                          displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                          style: const TextStyle(color: Color(0xFFFFD700), fontSize: 24, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              displayName,
+                              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              state.currentUserId ?? '',
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.greenAccent.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'ONLINE',
+                                style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
             const Padding(
-              padding: EdgeInsets.all(20.0),
-              child: Text(
-                'Contacts',
-                style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              padding: EdgeInsets.only(top: 20.0, left: 20, right: 20, bottom: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.contacts_outlined, color: Colors.white54, size: 18),
+                  SizedBox(width: 12),
+                  Text(
+                    'CONTACTS',
+                    style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  ),
+                ],
               ),
             ),
-            const Divider(color: Colors.white10),
             Expanded(
               child: BlocBuilder<PttBloc, PttStateContainer>(
                 builder: (context, state) {
@@ -504,30 +584,67 @@ class _PttScreenState extends State<PttScreen> {
   Widget _buildPttButton(BuildContext context, PttStateContainer state) {
     final bool isTalking = state.status == PttState.talking;
     final bool isReceiving = state.status == PttState.receiving;
-    Color outerCircleColor = isTalking ? Colors.redAccent : (isReceiving ? Colors.greenAccent : Colors.white10);
-    Color iconColor = isTalking ? Colors.redAccent : (isReceiving ? Colors.greenAccent : const Color(0xFFFFD700));
+    
+    Color accentColor = isTalking ? Colors.redAccent : (isReceiving ? Colors.greenAccent : const Color(0xFFFFD700));
+    Color outerCircleColor = isTalking || isReceiving ? accentColor : Colors.white10;
 
     return GestureDetector(
       onTapDown: isReceiving ? null : (_) {
-        if (state.activeGroupId != null) context.read<PttBloc>().add(PttStarted(state.activeGroupId!));
+        if (state.activeGroupId != null) {
+          HapticFeedback.mediumImpact();
+          context.read<PttBloc>().add(PttStarted(state.activeGroupId!));
+        }
       },
-      onTapUp: (_) => context.read<PttBloc>().add(PttStopped()),
+      onTapUp: (_) {
+        if (isTalking) HapticFeedback.lightImpact();
+        context.read<PttBloc>().add(PttStopped());
+      },
       onTapCancel: () => context.read<PttBloc>().add(PttStopped()),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 240, height: 240,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: outerCircleColor, width: 2),
-          boxShadow: [BoxShadow(color: outerCircleColor.withOpacity(0.2), blurRadius: 40, spreadRadius: 5)],
-        ),
-        child: Center(
-          child: Container(
-            width: 180, height: 180,
-            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black),
-            child: Icon(isTalking || isReceiving ? Icons.mic : Icons.mic_none, size: 80, color: iconColor),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Pulse Animation for "Talking"
+          if (isTalking)
+            _PttRipple(color: Colors.redAccent),
+          
+          // Receiving Visualization
+          if (isReceiving)
+             _PttRipple(color: Colors.greenAccent),
+
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: isTalking ? 260 : 240, 
+            height: isTalking ? 260 : 240,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: outerCircleColor, width: isTalking || isReceiving ? 4 : 2),
+              boxShadow: [
+                BoxShadow(
+                  color: outerCircleColor.withOpacity(isTalking || isReceiving ? 0.3 : 0.05), 
+                  blurRadius: isTalking ? 60 : 40, 
+                  spreadRadius: isTalking ? 10 : 5
+                )
+              ],
+            ),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 100),
+                width: isTalking ? 170 : 180, 
+                height: isTalking ? 170 : 180,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle, 
+                  color: isTalking ? Colors.redAccent.withOpacity(0.1) : Colors.black,
+                  border: isTalking ? Border.all(color: Colors.redAccent.withOpacity(0.5), width: 1) : null,
+                ),
+                child: Icon(
+                  isTalking || isReceiving ? Icons.mic : Icons.mic_none, 
+                  size: isTalking ? 90 : 80, 
+                  color: accentColor
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -542,6 +659,63 @@ class _PttScreenState extends State<PttScreen> {
           SizedBox(width: 8),
           Text('NETWORK READY', style: TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 1)),
         ],
+      ),
+    );
+  }
+}
+
+class _PttRipple extends StatefulWidget {
+  final Color color;
+  const _PttRipple({required this.color});
+
+  @override
+  State<_PttRipple> createState() => _PttRippleState();
+}
+
+class _PttRippleState extends State<_PttRipple> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            _buildCircle(1.0 + _controller.value * 0.5, 1.0 - _controller.value),
+            _buildCircle(1.0 + (_controller.value + 0.5) % 1.0 * 0.5, 1.0 - (_controller.value + 0.5) % 1.0),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCircle(double scale, double opacity) {
+    return Transform.scale(
+      scale: scale,
+      child: Container(
+        width: 240,
+        height: 240,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: widget.color.withOpacity(opacity * 0.5), width: 2),
+        ),
       ),
     );
   }

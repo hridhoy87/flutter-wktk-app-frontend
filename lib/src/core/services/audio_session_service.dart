@@ -19,8 +19,9 @@ class AudioSessionService {
         androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransient,
       ));
 
-      await session.setActive(true);
-      L.success('Audio Session Initialized for PTT');
+      // Removed session.setActive(true) from here. 
+      // The AudioRepository will manage activation on-demand for PTT.
+      L.success('Audio Session Configured (Idle State)');
     } catch (e) {
       L.error('Failed to initialize Audio Session', e);
     }

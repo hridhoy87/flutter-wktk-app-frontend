@@ -178,4 +178,16 @@ class AuthRepository {
       throw Exception(error['detail'] ?? 'Failed to create temporary channel');
     }
   }
+
+  Future<void> deleteChannel(int channelId) async {
+    final token = await getToken();
+    final response = await http.delete(
+      Uri.parse('$baseUrl/channels/$channelId'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200 && response.statusCode != 404) {
+      final error = jsonDecode(response.body);
+      throw Exception(error['detail'] ?? 'Failed to delete channel');
+    }
+  }
 }

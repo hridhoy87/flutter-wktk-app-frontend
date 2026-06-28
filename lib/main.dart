@@ -114,8 +114,10 @@ class AuthGate extends StatelessWidget {
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
         if (state is Authenticated) {
+          // Initialize with '1' as a default guess for the Global channel ID, 
+          // but the Bloc will be updated to handle this more gracefully.
           context.read<PttBloc>().add(
-            PttInitializeRequested(state.phone, 'alpha_group'),
+            PttInitializeRequested(state.phone, '1'),
           );
         }
       },

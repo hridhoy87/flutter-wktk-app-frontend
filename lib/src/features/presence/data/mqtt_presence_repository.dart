@@ -12,8 +12,8 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
   final Map<String, UserStatus> _currentPresence = {};
   List<String> _groupIds = [];
   String? _userId;
+  bool _isListening = false;
   
-  // Unique prefix to avoid collision on public broker
   static const String topicPrefix = 'walkie_talkie_v3_99'; 
 
   MqttPresenceRepositoryImpl(String server, String clientId)
@@ -27,22 +27,27 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
     _groupIds = groupIds;
     _userId = userId;
     
-    // If already connected, just update subscriptions
-    if (client.connectionStatus?.state == MqttConnectionState.connected) {
+    final state = client.connectionStatus?.state;
+    
+    if (state == MqttConnectionState.connected) {
       _onConnected();
+      return;
+    }
+    
+    if (state == MqttConnectionState.connecting) {
+      L.info('MQTT: Already connecting, waiting...');
       return;
     }
     
     client.logging(on: false);
     client.setProtocolV311();
     client.keepAlivePeriod = 20;
-    client.autoReconnect = true; // Enable auto-reconnect
+    client.autoReconnect = true;
     client.onDisconnected = _onDisconnected;
     client.onConnected = _onConnected;
 
     final connMessage = MqttConnectMessage()
         .withClientIdentifier(userId)
-        // Set LWT to the primary group's presence topic so others see the disconnect immediately
         .withWillTopic('$topicPrefix/groups/${groupIds.first}/presence/$userId')
         .withWillMessage(jsonEncode({'status': 'offline'}))
         .withWillRetain()
@@ -53,15 +58,18 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
       L.info('MQTT: Connecting to broker as $userId...');
       await client.connect();
     } catch (e) {
-      L.error('MQTT Connection Failed', e);
+      if (e.toString().contains('connecting')) {
+        L.warning('MQTT: Ignored connection attempt during "connecting" state');
+      } else {
+        L.error('MQTT Connection Failed', e);
+      }
     }
   }
 
   void _onConnected() {
     L.success('MQTT: Connected and Authenticated');
     
-    if (_userId != null) {
-      // Clear old presence when switching channels
+    if (_userId != null && client.connectionStatus?.state == MqttConnectionState.connected) {
       _currentPresence.clear();
 
       for (final groupId in _groupIds) {
@@ -70,14 +78,14 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
         L.info('MQTT: Subscribed to $topic');
       }
       
-      // Start listening if not already (updates is a stream, we only need one listener ideally)
-      // Actually client.updates is a stream that we should probably listen to once.
-      // But for simplicity in this task, I'll keep it as is or fix it.
-      client.updates!.listen((List<MqttReceivedMessage<MqttMessage>> c) {
-        final MqttPublishMessage recMess = c[0].payload as MqttPublishMessage;
-        final pt = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
-        _handlePresenceUpdate(c[0].topic, pt);
-      });
+      if (!_isListening && client.updates != null) {
+        _isListening = true;
+        client.updates!.listen((List<MqttReceivedMessage<MqttMessage>> c) {
+          final MqttPublishMessage recMess = c[0].payload as MqttPublishMessage;
+          final pt = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
+          _handlePresenceUpdate(c[0].topic, pt);
+        });
+      }
 
       updateStatus(UserStatus.online);
     }

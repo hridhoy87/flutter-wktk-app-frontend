@@ -32,12 +32,14 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
     _currentUserId = userId;
     
     final sigTopic = '$topicPrefix/channels/$_channelId/users/$_currentUserId/signaling';
+    final broadcastTopic = '$topicPrefix/channels/$_channelId/broadcast';
     final inviteTopic = '$topicPrefix/users/$_currentUserId/invites';
     
     client.subscribe(sigTopic, MqttQos.atLeastOnce);
+    client.subscribe(broadcastTopic, MqttQos.atLeastOnce);
     client.subscribe(inviteTopic, MqttQos.atLeastOnce);
     
-    L.info('MQTT: Subscribed to signaling ($sigTopic) and invites ($inviteTopic)');
+    L.info('MQTT: Subscribed to signaling ($sigTopic), broadcast ($broadcastTopic) and invites ($inviteTopic)');
     
     // Only set up listener once
     if (_isListening) return;
@@ -46,10 +48,13 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
     client.updates!.listen((List<MqttReceivedMessage<MqttMessage>> c) {
       final String receivedTopic = c[0].topic;
       final bool isSignaling = receivedTopic.contains('/signaling');
+      final bool isBroadcast = receivedTopic.contains('/broadcast');
       final bool isInvite = receivedTopic.contains('/invites');
       
-      if (!isSignaling && !isInvite) return;
-      if (!receivedTopic.contains(_currentUserId)) return;
+      if (!isSignaling && !isInvite && !isBroadcast) return;
+      
+      // If it's signaling, it MUST be for us. If it's broadcast, it's for everyone in the channel.
+      if (isSignaling && !receivedTopic.contains(_currentUserId)) return;
 
       final MqttPublishMessage recMess = c[0].payload as MqttPublishMessage;
       final payload = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
@@ -70,7 +75,15 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
     if (client.connectionStatus?.state != MqttConnectionState.connected) return;
 
     final topic = '$topicPrefix/channels/$_channelId/users/$targetUserId/signaling';
-    _publish(topic, payload);
+    _publish(topic, payload, qos: MqttQos.atLeastOnce); // Use QoS 1 for reliable handshake
+  }
+
+  @override
+  Future<void> sendBroadcast(SignalingPayload payload) async {
+    if (client.connectionStatus?.state != MqttConnectionState.connected) return;
+
+    final topic = '$topicPrefix/channels/$_channelId/broadcast';
+    _publish(topic, payload, qos: MqttQos.atLeastOnce);
   }
 
   @override
@@ -81,10 +94,10 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
     _publish(topic, payload);
   }
 
-  void _publish(String topic, SignalingPayload payload) {
+  void _publish(String topic, SignalingPayload payload, {MqttQos qos = MqttQos.atMostOnce}) {
     final builder = MqttClientPayloadBuilder();
     builder.addString(jsonEncode(payload.toJson()));
-    client.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
+    client.publishMessage(topic, qos, builder.payload!);
   }
 
   @override

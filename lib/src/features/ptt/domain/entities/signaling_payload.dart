@@ -5,6 +5,7 @@ class SignalingPayload {
   final String? sdp;
   final Map<String, dynamic>? candidate;
   final String fromUserId;
+  final String? toUserId; // Added to handle point-to-point mesh signaling
   final DateTime timestamp;
   final String? groupId;
   final String? password;
@@ -16,6 +17,7 @@ class SignalingPayload {
     this.sdp,
     this.candidate,
     required this.fromUserId,
+    this.toUserId,
     required this.timestamp,
     this.groupId,
     this.password,
@@ -23,14 +25,14 @@ class SignalingPayload {
     this.channelName,
   });
 
-  bool get isExpired => 
-      DateTime.now().difference(timestamp).inSeconds.abs() > 30; // Increased for invites
+  bool get isExpired => false; // Disabled expiry to prevent clock-sync issues breaking PTT
 
   Map<String, dynamic> toJson() => {
     'type': type.name,
     'sdp': sdp,
     'candidate': candidate,
     'fromUserId': fromUserId,
+    'toUserId': toUserId,
     'timestamp': timestamp.toIso8601String(),
     'groupId': groupId,
     'password': password,
@@ -44,6 +46,7 @@ class SignalingPayload {
       sdp: json['sdp'],
       candidate: json['candidate'],
       fromUserId: json['fromUserId'] ?? 'unknown',
+      toUserId: json['toUserId'],
       timestamp: json['timestamp'] != null 
           ? DateTime.parse(json['timestamp']) 
           : DateTime.now(),
