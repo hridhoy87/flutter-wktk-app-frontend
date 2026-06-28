@@ -6,6 +6,8 @@ abstract class SignalingRepository {
   Future<void> init(String channelId, String userId);
   
   Future<void> sendSignaling(String targetUserId, SignalingPayload payload);
+
+  Future<void> sendInvite(String targetUserId, SignalingPayload payload);
   
   Future<void> dispose();
 }

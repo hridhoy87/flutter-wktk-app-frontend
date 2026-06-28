@@ -1,6 +1,4 @@
-import 'dart:convert';
-
-enum SignalingType { offer, answer, iceCandidate }
+enum SignalingType { offer, answer, iceCandidate, invite, accept, decline }
 
 class SignalingPayload {
   final SignalingType type;
@@ -8,6 +6,10 @@ class SignalingPayload {
   final Map<String, dynamic>? candidate;
   final String fromUserId;
   final DateTime timestamp;
+  final String? groupId;
+  final String? password;
+  final bool isCustom;
+  final String? channelName;
 
   SignalingPayload({
     required this.type,
@@ -15,10 +17,14 @@ class SignalingPayload {
     this.candidate,
     required this.fromUserId,
     required this.timestamp,
+    this.groupId,
+    this.password,
+    this.isCustom = false,
+    this.channelName,
   });
 
   bool get isExpired => 
-      DateTime.now().difference(timestamp).inMilliseconds > 2500;
+      DateTime.now().difference(timestamp).inSeconds.abs() > 30; // Increased for invites
 
   Map<String, dynamic> toJson() => {
     'type': type.name,
@@ -26,13 +32,25 @@ class SignalingPayload {
     'candidate': candidate,
     'fromUserId': fromUserId,
     'timestamp': timestamp.toIso8601String(),
+    'groupId': groupId,
+    'password': password,
+    'isCustom': isCustom,
+    'channelName': channelName,
   };
 
-  factory SignalingPayload.fromJson(Map<String, dynamic> json) => SignalingPayload(
-    type: SignalingType.values.byName(json['type']),
-    sdp: json['sdp'],
-    candidate: json['candidate'],
-    fromUserId: json['fromUserId'],
-    timestamp: DateTime.parse(json['timestamp']),
-  );
+  factory SignalingPayload.fromJson(Map<String, dynamic> json) {
+    return SignalingPayload(
+      type: SignalingType.values.byName(json['type'] ?? 'offer'),
+      sdp: json['sdp'],
+      candidate: json['candidate'],
+      fromUserId: json['fromUserId'] ?? 'unknown',
+      timestamp: json['timestamp'] != null 
+          ? DateTime.parse(json['timestamp']) 
+          : DateTime.now(),
+      groupId: json['groupId'],
+      password: json['password'],
+      isCustom: json['isCustom'] ?? false,
+      channelName: json['channelName'],
+    );
+  }
 }
