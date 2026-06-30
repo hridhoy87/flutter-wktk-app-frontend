@@ -55,6 +55,9 @@ class BackgroundService {
     DartPluginRegistrant.ensureInitialized();
     L.info('Background Service Started');
 
+    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+        FlutterLocalNotificationsPlugin();
+
     if (service is AndroidServiceInstance) {
       service.on('setAsForeground').listen((event) {
         service.setAsForegroundService();
@@ -68,16 +71,37 @@ class BackgroundService {
       service.stopSelf();
     });
 
-    Timer.periodic(const Duration(seconds: 30), (timer) async {
-      if (service is AndroidServiceInstance) {
-        if (await service.isForegroundService()) {
+    service.on('updateNotification').listen((event) {
+      if (service is AndroidServiceInstance && event != null) {
+        final title = event['title'] as String? ?? 'PTT READY';
+        final content = event['content'] as String? ?? 'Monitoring for incoming voice...';
+        final int? colorValue = event['color'] as int?;
+
+        if (colorValue != null) {
+          flutterLocalNotificationsPlugin.show(
+            notificationId,
+            title,
+            content,
+            NotificationDetails(
+              android: AndroidNotificationDetails(
+                notificationChannelId,
+                'PTT Background Service',
+                icon: '@mipmap/ic_launcher',
+                ongoing: true,
+                color: Color(colorValue),
+                showWhen: false,
+              ),
+            ),
+          );
+        } else {
           service.setForegroundNotificationInfo(
-            title: "PTT ACTIVE",
-            content: "Ready to receive voice",
+            title: title,
+            content: content,
           );
         }
       }
-      L.info('Background Service Heartbeat');
     });
+
+    L.info('Background Service Initialized');
   }
 }

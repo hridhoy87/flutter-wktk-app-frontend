@@ -21,30 +21,11 @@ class PttScreen extends StatefulWidget {
 class _PttScreenState extends State<PttScreen> {
   Map<String, String> _contactMap = {};
   final Set<String> _selectedUserIds = {};
-  late AppLinks _appLinks;
 
   @override
   void initState() {
     super.initState();
     _fetchContacts();
-    _initDeepLinks();
-  }
-
-  void _initDeepLinks() {
-    _appLinks = AppLinks();
-    _appLinks.uriLinkStream.listen((uri) {
-      _handleDeepLink(uri);
-    });
-  }
-
-  void _handleDeepLink(Uri uri) {
-    if (uri.scheme == 'walkietalkie' && uri.host == 'join') {
-      final channelId = uri.queryParameters['channel_id'];
-      final pwd = uri.queryParameters['pwd'];
-      if (channelId != null) {
-        context.read<PttBloc>().add(PttChannelChanged(channelId, password: pwd));
-      }
-    }
   }
 
   Future<void> _fetchContacts() async {
@@ -85,13 +66,18 @@ class _PttScreenState extends State<PttScreen> {
   Widget build(BuildContext context) {
     return BlocListener<PttBloc, PttStateContainer>(
       listenWhen: (prev, curr) => 
-          prev.pendingInvite != curr.pendingInvite || prev.shareLink != curr.shareLink,
+          prev.pendingInvite != curr.pendingInvite || 
+          prev.shareLink != curr.shareLink ||
+          prev.showInvitePrompt != curr.showInvitePrompt,
       listener: (context, state) {
         if (state.pendingInvite != null) {
           _showInviteDialog(state.pendingInvite!);
         }
         if (state.shareLink != null) {
           Share.share(state.shareLink!);
+        }
+        if (state.showInvitePrompt && state.inviteShareText != null) {
+          _showSmsInviteDialog(state.inviteShareText!, state.absentUserIds ?? [], state.allUsers);
         }
       },
       child: Scaffold(
@@ -150,6 +136,74 @@ class _PttScreenState extends State<PttScreen> {
               Navigator.pop(context);
             },
             child: const Text('ACCEPT', style: TextStyle(color: Colors.greenAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSmsInviteDialog(String text, List<String> absentIds, List<Map<String, dynamic>> allUsers) {
+    final List<String> absentNames = absentIds.map((id) {
+      final name = _getDisplayName(id, allUsers);
+      return "$name ($id)";
+    }).toList();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Send Invitation?', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Absent list:',
+              style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              absentNames.join(', '),
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'did not join. Send invitation?:',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(color: Colors.white54, fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              context.read<PttBloc>().add(ClearInvitePrompt());
+              Navigator.pop(context);
+            },
+            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
+            onPressed: () async {
+              context.read<PttBloc>().add(ClearInvitePrompt());
+              Navigator.pop(context);
+              await Clipboard.setData(ClipboardData(text: text));
+              Share.share(text);
+            },
+            child: const Text('SEND', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

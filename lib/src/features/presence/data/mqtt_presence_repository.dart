@@ -11,6 +11,7 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
   final _statusController = StreamController<Map<String, UserStatus>>.broadcast();
   final Map<String, UserStatus> _currentPresence = {};
   List<String> _groupIds = [];
+  final Set<String> _subscribedTopics = {};
   String? _userId;
   bool _isListening = false;
   
@@ -72,9 +73,16 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
     if (_userId != null && client.connectionStatus?.state == MqttConnectionState.connected) {
       _currentPresence.clear();
 
+      // Unsubscribe from old topics
+      for (final topic in _subscribedTopics) {
+        client.unsubscribe(topic);
+      }
+      _subscribedTopics.clear();
+
       for (final groupId in _groupIds) {
         final topic = '$topicPrefix/groups/$groupId/presence/#';
         client.subscribe(topic, MqttQos.atMostOnce);
+        _subscribedTopics.add(topic);
         L.info('MQTT: Subscribed to $topic');
       }
       
@@ -138,6 +146,9 @@ class MqttPresenceRepositoryImpl implements PresenceRepository {
   @override
   Future<void> disconnect() async {
     await updateStatus(UserStatus.offline);
+    _subscribedTopics.clear();
+    _userId = null;
+    _groupIds = [];
     client.disconnect();
   }
 

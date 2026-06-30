@@ -11,5 +11,7 @@ abstract class SignalingRepository {
 
   Future<void> sendInvite(String targetUserId, SignalingPayload payload);
   
+  Future<void> disconnect();
+  
   Future<void> dispose();
 }

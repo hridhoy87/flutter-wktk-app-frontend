@@ -1,6 +1,6 @@
-# walkie_talkie
+# Soft Walkie Talkie
 
-A new Flutter project.
+A Flutter based mobile app.
 
 ## Getting Started
 

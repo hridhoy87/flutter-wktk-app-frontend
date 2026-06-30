@@ -24,3 +24,27 @@ logs*.txt
 .idea/
 .vscode/
 *.iml
+
+# Python / Backend
+backend/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# WTRP Project Modules (Separate Repos)
+zepp_os_app/
+open_ptt_remote_protocol/
+wearable_soft_ptt_button/
+wtrp_remote/
+zepp_os_ptt_app/
+
+# Specialized ignores
+node_modules/
+.vercel

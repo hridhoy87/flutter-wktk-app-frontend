@@ -19,6 +19,8 @@ import 'src/features/admin/presentation/bloc/admin_bloc.dart';
 
 import 'src/features/auth/data/auth_repository.dart';
 import 'src/features/auth/presentation/bloc/auth_bloc.dart';
+import 'src/core/services/watch_bridge_service.dart';
+import 'package:app_links/app_links.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +29,9 @@ void main() async {
   await [
     Permission.microphone,
     Permission.notification,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.location,
   ].request();
 
   await AudioSessionService.initializeForPtt();
@@ -49,6 +54,29 @@ void main() async {
   final signalingRepo = MqttSignalingRepositoryImpl(presenceRepo.client);
   final adminRepo = AdminRepositoryImpl(baseUrl: backendUrl);
 
+  // Initialize PttBloc here to attach Deep Link listener
+  final pttBloc = PttBloc(
+    audioRepository: audioRepo,
+    presenceRepository: presenceRepo,
+    signalingRepository: signalingRepo,
+    authRepository: authRepo,
+  );
+  WatchBridgeService().initialize(pttBloc);
+
+  // --- Deep Link Handling ---
+  final appLinks = AppLinks();
+  
+  // Handle cold start deep link
+  final initialUri = await appLinks.getInitialAppLink();
+  if (initialUri != null) {
+    _handleDeepLink(initialUri, pttBloc);
+  }
+
+  // Handle background/foreground deep links
+  appLinks.uriLinkStream.listen((uri) {
+    _handleDeepLink(uri, pttBloc);
+  });
+
   runApp(
     MultiRepositoryProvider(
       providers: [
@@ -63,13 +91,8 @@ void main() async {
           BlocProvider(
             create: (context) => AuthBloc(authRepository: authRepo)..add(AppStarted()),
           ),
-          BlocProvider(
-            create: (context) => PttBloc(
-              audioRepository: audioRepo,
-              presenceRepository: presenceRepo,
-              signalingRepository: signalingRepo,
-              authRepository: authRepo,
-            ),
+          BlocProvider.value(
+            value: pttBloc,
           ),
           BlocProvider(
             create: (context) => AdminBloc(adminRepo),
@@ -79,6 +102,16 @@ void main() async {
       ),
     ),
   );
+}
+
+void _handleDeepLink(Uri uri, PttBloc pttBloc) {
+  if (uri.scheme == 'walkietalkie' && uri.host == 'join') {
+    final channelId = uri.queryParameters['channel_id'];
+    final pwd = uri.queryParameters['pwd'];
+    if (channelId != null) {
+      pttBloc.add(PttDeepLinkReceived(channelId, password: pwd));
+    }
+  }
 }
 
 class WalkieTalkieApp extends StatelessWidget {
@@ -119,6 +152,8 @@ class AuthGate extends StatelessWidget {
           context.read<PttBloc>().add(
             PttInitializeRequested(state.phone, '1'),
           );
+        } else if (state is Unauthenticated) {
+          context.read<PttBloc>().add(PttReset());
         }
       },
       builder: (context, state) {

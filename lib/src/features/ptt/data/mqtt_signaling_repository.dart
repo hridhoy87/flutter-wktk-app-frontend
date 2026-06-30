@@ -10,7 +10,7 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
   final MqttServerClient client;
   final _controller = StreamController<SignalingPayload>.broadcast();
   String? _channelId;
-  late String _currentUserId;
+  String? _currentUserId;
   bool _isListening = false;
   
   static const String topicPrefix = 'walkie_talkie_v3_99';
@@ -23,9 +23,17 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
   @override
   Future<void> init(String channelId, String userId) async {
     // Unsubscribe from previous channel if any
-    if (this._channelId != null) {
-      final oldTopic = '$topicPrefix/channels/$_channelId/users/$_currentUserId/signaling';
-      client.unsubscribe(oldTopic);
+    if (_channelId != null && _currentUserId != null) {
+      final oldSigTopic = '$topicPrefix/channels/$_channelId/users/$_currentUserId/signaling';
+      final oldBroadcastTopic = '$topicPrefix/channels/$_channelId/broadcast';
+      client.unsubscribe(oldSigTopic);
+      client.unsubscribe(oldBroadcastTopic);
+    }
+    
+    // If user changed, unsubscribe from old invites
+    if (_currentUserId != null && _currentUserId != userId) {
+      final oldInviteTopic = '$topicPrefix/users/$_currentUserId/invites';
+      client.unsubscribe(oldInviteTopic);
     }
 
     _channelId = channelId;
@@ -54,7 +62,7 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
       if (!isSignaling && !isInvite && !isBroadcast) return;
       
       // If it's signaling, it MUST be for us. If it's broadcast, it's for everyone in the channel.
-      if (isSignaling && !receivedTopic.contains(_currentUserId)) return;
+      if (isSignaling && (_currentUserId == null || !receivedTopic.contains(_currentUserId!))) return;
 
       final MqttPublishMessage recMess = c[0].payload as MqttPublishMessage;
       final payload = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
@@ -98,6 +106,14 @@ class MqttSignalingRepositoryImpl implements SignalingRepository {
     final builder = MqttClientPayloadBuilder();
     builder.addString(jsonEncode(payload.toJson()));
     client.publishMessage(topic, qos, builder.payload!);
+  }
+
+  @override
+  Future<void> disconnect() async {
+    _channelId = null;
+    _currentUserId = null;
+    // Note: We don't disconnect the client here because it's shared with PresenceRepository
+    // which has the primary responsibility for the connection lifecycle.
   }
 
   @override
